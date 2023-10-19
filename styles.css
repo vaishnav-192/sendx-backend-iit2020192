@@ -1,58 +1,108 @@
-/* Reset some default styles */
-body, h1, form {
-    margin: 0;
-    padding: 0;
-}
-
 body {
     font-family: Arial, sans-serif;
-    background-color: #f0f0f0;
+    background: #f0f0f0;
+    /* Background color */
     text-align: center;
-    margin: 0;
-    padding: 0;
+    padding: 20px;
 }
 
 h1 {
-    background-color: #333;
-    color: #fff;
-    padding: 10px;
+    font-size: 24px;
+    color: #333;
+    /* Text color */
     margin-bottom: 20px;
 }
 
 form {
-    background-color: #fff;
-    border: 1px solid #ddd;
-    border-radius: 5px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-    width: 300px;
-    margin: 0 auto;
+    background: #fff;
+    /* Form background color */
     padding: 20px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    /* Box shadow */
+    border-radius: 10px;
 }
 
 label {
-    display: block;
-    margin-bottom: 10px;
     font-weight: bold;
+    font-size: 16px;
+    color: #333;
+    /* Label text color */
 }
 
 input[type="text"] {
     width: 100%;
     padding: 10px;
-    margin-bottom: 20px;
+    margin-top: 8px;
     border: 1px solid #ccc;
-    border-radius: 3px;
+    border-radius: 5px;
+    box-sizing: border-box;
+    /* Properly fit the input box within the container */
 }
 
+
 input[type="submit"] {
-    background-color: #333;
+    background: #007bff;
+    /* Submit button background color */
     color: #fff;
+    /* Submit button text color */
     border: none;
     padding: 10px 20px;
+    margin-top: 10px;
     border-radius: 5px;
     cursor: pointer;
-    transition: background-color 0.3s;
+    transition: background 0.3s;
 }
 
 input[type="submit"]:hover {
-    background-color: #555;
+    background: #0606c2;
+    /* Hover background color */
+}
+
+/* Add a glassy effect */
+input[type="text"],
+input[type="submit"],
+label {
+    display: block;
+    transition: background 0.3s, color 0.3s;
+}
+
+input[type="text"]:focus,
+input[type="submit"]:focus {
+    background: #f9f9f9;
+    /* Focus background color */
+    color: #333;
+    /* Focus text color */
+}
+
+/* Add 3D effect */
+input[type="text"],
+input[type="submit"] {
+    text-align: center;
+    text-transform: uppercase;
+    text-shadow: 1px 1px 1px rgba(0, 0, 0, 0.1);
+}
+
+input[type="text"] {
+    font-size: 16px;
+}
+
+/* Add hover effect to the label */
+label:hover {
+    color: #007bff;
+    /* Label hover color */
+    cursor: pointer;
+}
+
+/* Add hover effect to the input elements */
+input[type="text"]:hover{
+    background: #dedede;
+}
+input[type="submit"]:hover {
+    background: #0eee59;
+    /* Hover background color */
+}
+
+/* Add a glassy effect to the form */
+form {
+    background: linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.9));
 }

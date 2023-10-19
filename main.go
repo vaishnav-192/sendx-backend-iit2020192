@@ -27,75 +27,8 @@ var (
 
 func main() {
 
-	http.Handle(
-		"/static/",
-		http.StripPrefix(
-			"/static/",
-			http.FileServer(http.Dir("static")),
-		),
-	)
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			http.ServeFile(w, r, "index.html")
-		}
-	})
-
-	http.HandleFunc("/crawl", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
-			r.ParseForm()
-			url := r.PostFormValue("url")
-
-			if url == "" {
-				http.Error(w, "URL is required", http.StatusBadRequest)
-				return
-			}
-
-			exists, err := checkURLExistenceWithRetries(url, 3, 5) // URL, Max Retries, and Retry Interval (in seconds)
-
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-
-			if exists {
-
-				// Check if the URL is in the cache and not expired
-				cachedData, cacheExists := getFromCache(url)
-
-				if cacheExists {
-					// Serve the cached page if available
-					fmt.Println("Serving from cache")
-					serveCachedPage(w, cachedData)
-				} else {
-
-					// Crawl the web page and scrape data and links
-					data := crawlWebPage(url)
-
-					for i, text := range data.Text {
-						data.Text[i] = strings.TrimSpace(text)
-					}
-
-					// Cache the scraped data
-					cachePage(url, data)
-
-					// Return the scraped data as JSON
-					jsonResponse, err := json.Marshal(data)
-					if err != nil {
-						http.Error(w, "Failed to marshal JSON", http.StatusInternalServerError)
-						return
-					}
-
-					w.Header().Set("Content-Type", "application/json")
-
-					w.Write(jsonResponse)
-				}
-
-			} else {
-				http.Error(w, "Web page not found", http.StatusNotFound)
-			}
-		}
-	})
+	http.HandleFunc("/crawl", crawlhandler)
+	http.Handle("/", http.FileServer(http.Dir(".")))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -103,7 +36,66 @@ func main() {
 	}
 
 	fmt.Printf("Server is running on port %s...\n", port)
-	http.ListenAndServe(":"+port, nil)
+	err := http.ListenAndServe(":"+port, nil)
+	if err != nil {
+		log.Fatal("error in server listening...", err)
+	}
+}
+
+func crawlhandler(w http.ResponseWriter, r *http.Request) {
+
+	r.ParseForm()
+	url := r.PostFormValue("url")
+
+	if url == "" {
+		http.Error(w, "URL is required", http.StatusBadRequest)
+		return
+	}
+
+	exists, err := checkURLExistenceWithRetries(url, 3, 5) // URL, Max Retries, and Retry Interval (in seconds)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if exists {
+
+		// Check if the URL is in the cache and not expired
+		cachedData, cacheExists := getFromCache(url)
+
+		if cacheExists {
+			// Serve the cached page if available
+			fmt.Println("Serving from cache")
+			serveCachedPage(w, cachedData)
+		} else {
+
+			// Crawl the web page and scrape data and links
+			data := crawlWebPage(url)
+
+			for i, text := range data.Text {
+				data.Text[i] = strings.TrimSpace(text)
+			}
+
+			// Cache the scraped data
+			cachePage(url, data)
+
+			// Return the scraped data as JSON
+			jsonResponse, err := json.Marshal(data)
+			if err != nil {
+				http.Error(w, "Failed to marshal JSON", http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+
+			w.Write(jsonResponse)
+		}
+
+	} else {
+		http.Error(w, "Web page not found", http.StatusNotFound)
+	}
+
 }
 
 func checkURLExistenceWithRetries(url string, maxRetries int, retryInterval int) (bool, error) {
