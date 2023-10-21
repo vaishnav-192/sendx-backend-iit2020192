@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
+
+	// "net/url"
 	"os"
-	"strings"
+	// "strings"
 	"sync"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 )
 
 type ScrapedData struct {
-	Text  []string `json:"text"`
 	Links []string `json:"links"`
 }
 
@@ -29,7 +29,7 @@ type cachedata struct {
 	Time time.Time
 }
 
-var visitedURLs = make(map[string]struct{})
+var visitedURLs = make(map[string]bool)
 
 func main() {
 
@@ -89,9 +89,6 @@ func crawlhandler(w http.ResponseWriter, r *http.Request) {
 			// Crawl the web page and scrape data and links
 			data := crawlWebPage(url)
 
-			for i, text := range data.Text {
-				data.Text[i] = strings.TrimSpace(text)
-			}
 			Cachedata[url] = cachedata{
 				url:  url,
 				data: data,
@@ -159,52 +156,32 @@ func checkURLExistence(url string) (bool, error) {
 	return false, nil
 }
 
-func isVisited(url string) bool {
-	_, visited := visitedURLs[url]
-	return visited
-}
-
 func crawlWebPage(Weburl string) ScrapedData {
-	c := colly.NewCollector()
+	// Create a new Colly collector.
+	c := colly.NewCollector(
+		colly.MaxDepth(3),
+		colly.Async(true),
+	)
+	// c.Limit(&colly.LimitRule{DomainGlob: "*", Parallelism: 2})
 
 	var data ScrapedData
 	// URL to start scraping
 	startURL := Weburl
 
-	baseURL, _ := url.Parse(Weburl)
-
-	visited := make(map[string]struct{})
+	// visited := make(map[string]struct{})
 	var mutex sync.Mutex
-
-	// Set up callbacks for different data types
-	c.OnHTML("p", func(e *colly.HTMLElement) {
-		// Extract and print text data
-		// fmt.Printf("Text: %s\n", e.Text)
-
-		// Extract and add text data to the result
-		data.Text = append(data.Text, e.Text)
-	})
 
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		// Extract and print links
 		link := e.Request.AbsoluteURL(e.Attr("href"))
-		// fmt.Printf("Link: %s\n", link)
+		fmt.Printf("Link: %s\n", link)
 
-		// Extract and add text data to the result
-		data.Text = append(data.Text, e.Text)
-		linkURL, err := url.Parse(link)
-		if err != nil {
-			// Handle the error
-			// log.Printf("Error parsing URL %s: %v", link, err)
-			return
-		}
-
-		if linkURL.Host == baseURL.Host && !isVisited(link) {
+		if !visitedURLs[link] {
 			mutex.Lock()
 			data.Links = append(data.Links, link)
-			visited[link] = struct{}{}
+			visitedURLs[link] = true
 			mutex.Unlock()
-
+			e.Request.Visit(link)
 		}
 	})
 
@@ -218,6 +195,8 @@ func crawlWebPage(Weburl string) ScrapedData {
 	if err != nil {
 		log.Printf("Error visiting %s: %v", startURL, err)
 	}
+	// Wait for the crawler to finish.
+	c.Wait()
 
 	return data
 }
