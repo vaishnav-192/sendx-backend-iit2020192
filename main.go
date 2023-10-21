@@ -31,6 +31,48 @@ type cachedata struct {
 
 var visitedURLs = make(map[string]bool)
 
+type request struct {
+	url  string
+	paid bool
+}
+
+type queue struct {
+	mutex    sync.Mutex
+	requests []request
+}
+
+func (q *queue) enqueue(r request) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	if r.paid {
+		q.requests = append([]request{r}, q.requests...)
+	} else {
+		q.requests = append(q.requests, r)
+	}
+}
+
+func (q *queue) dequeue() request {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	r := q.requests[0]
+	q.requests = q.requests[1:]
+
+	return r
+}
+
+func (q *queue) isOpen() bool {
+	return len(q.requests) > 0
+}
+
+func (q *queue) close() {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	q.requests = nil
+}
+
 func main() {
 
 	http.HandleFunc("/crawl", crawlhandler)
@@ -49,6 +91,9 @@ func main() {
 }
 
 func crawlhandler(w http.ResponseWriter, r *http.Request) {
+
+	// Create a new waitgroup to track the completion of the goroutine.
+	var wg sync.WaitGroup
 
 	r.ParseForm()
 	url := r.PostFormValue("url")
@@ -70,46 +115,77 @@ func crawlhandler(w http.ResponseWriter, r *http.Request) {
 
 	if exists {
 
-		mu.Lock()
-		defer mu.Unlock()
+		// Create a new queue to store the requests.
+		q := queue{}
+		wg.Add(1)
 
-		cache, present := Cachedata[url]
-		if present {
-			jsonResponse, err := json.Marshal(cache)
-			if err != nil {
-				http.Error(w, "Failed to marshal JSON", http.StatusInternalServerError)
-				return
+		// Add the request to the queue.
+		q.enqueue(request{
+			url:  url,
+			paid: customerType == "Paid",
+		})
+
+		// Start a goroutine to process the requests in the queue.
+		go func() {
+			defer wg.Done()
+			for {
+				if q.isOpen() {
+					req := q.dequeue()
+					// Process the request.
+					processRequest(w, req)
+				} else {
+					q.close()
+					return
+				}
 			}
-
-			w.Header().Set("Content-Type", "application/json")
-
-			w.Write(jsonResponse)
-		} else {
-
-			// Crawl the web page and scrape data and links
-			data := crawlWebPage(url)
-
-			Cachedata[url] = cachedata{
-				url:  url,
-				data: data,
-				Time: time.Now(),
-			}
-
-			// Return the scraped data as JSON
-			jsonResponse, err := json.Marshal(data)
-			if err != nil {
-				http.Error(w, "Failed to marshal JSON", http.StatusInternalServerError)
-				return
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-
-			w.Write(jsonResponse)
-		}
+		}()
 
 	} else {
 		http.Error(w, "Web page not found", http.StatusNotFound)
 	}
+
+	// Wait for the goroutine to finish before returning the response to the user.
+	wg.Wait()
+}
+
+func processRequest(w http.ResponseWriter, r request) {
+
+	url := r.url
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	cache, present := Cachedata[url]
+	if present {
+		fmt.Printf("data found in cache. Serving from cache...\n")
+		writeToUser(w, cache.data)
+	} else {
+
+		// Crawl the web page and scrape data and links
+		data := crawlWebPage(url)
+
+		Cachedata[url] = cachedata{
+			url:  url,
+			data: data,
+			Time: time.Now(),
+		}
+
+		// Return the scraped data as JSON
+		writeToUser(w, data)
+	}
+
+}
+
+func writeToUser(w http.ResponseWriter, data ScrapedData) {
+	jsonResponse, err := json.Marshal(data)
+	if err != nil {
+		http.Error(w, "Failed to marshal JSON", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	w.Write(jsonResponse)
 
 }
 
@@ -160,7 +236,7 @@ func crawlWebPage(Weburl string) ScrapedData {
 	// Create a new Colly collector.
 	c := colly.NewCollector(
 		colly.MaxDepth(3),
-		colly.Async(true),
+		// colly.Async(true),
 	)
 	// c.Limit(&colly.LimitRule{DomainGlob: "*", Parallelism: 2})
 
