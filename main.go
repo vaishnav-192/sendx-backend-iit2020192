@@ -19,11 +19,17 @@ type ScrapedData struct {
 	Links []string `json:"links"`
 }
 
-var (
-	cacheLock   sync.RWMutex
-	pageCache   = make(map[string]ScrapedData)
-	visitedURLs = make(map[string]struct{})
-)
+var mu sync.Mutex
+
+var Cachedata = make(map[string]cachedata)
+
+type cachedata struct {
+	url  string
+	data ScrapedData
+	Time time.Time
+}
+
+var visitedURLs = make(map[string]struct{})
 
 func main() {
 
@@ -46,6 +52,9 @@ func crawlhandler(w http.ResponseWriter, r *http.Request) {
 
 	r.ParseForm()
 	url := r.PostFormValue("url")
+	customerType := r.PostFormValue("customerType")
+
+	fmt.Printf("%s and %s\n", url, customerType)
 
 	if url == "" {
 		http.Error(w, "URL is required", http.StatusBadRequest)
@@ -61,13 +70,20 @@ func crawlhandler(w http.ResponseWriter, r *http.Request) {
 
 	if exists {
 
-		// Check if the URL is in the cache and not expired
-		cachedData, cacheExists := getFromCache(url)
+		mu.Lock()
+		defer mu.Unlock()
 
-		if cacheExists {
-			// Serve the cached page if available
-			fmt.Println("Serving from cache")
-			serveCachedPage(w, cachedData)
+		cache, present := Cachedata[url]
+		if present {
+			jsonResponse, err := json.Marshal(cache)
+			if err != nil {
+				http.Error(w, "Failed to marshal JSON", http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+
+			w.Write(jsonResponse)
 		} else {
 
 			// Crawl the web page and scrape data and links
@@ -76,9 +92,11 @@ func crawlhandler(w http.ResponseWriter, r *http.Request) {
 			for i, text := range data.Text {
 				data.Text[i] = strings.TrimSpace(text)
 			}
-
-			// Cache the scraped data
-			cachePage(url, data)
+			Cachedata[url] = cachedata{
+				url:  url,
+				data: data,
+				Time: time.Now(),
+			}
 
 			// Return the scraped data as JSON
 			jsonResponse, err := json.Marshal(data)
@@ -202,27 +220,4 @@ func crawlWebPage(Weburl string) ScrapedData {
 	}
 
 	return data
-}
-
-func cachePage(url string, data ScrapedData) {
-	cacheLock.Lock()
-	defer cacheLock.Unlock()
-	pageCache[url] = data
-}
-
-func getFromCache(url string) (ScrapedData, bool) {
-	cacheLock.RLock()
-	defer cacheLock.RUnlock()
-	cachedData, exists := pageCache[url]
-	return cachedData, exists
-}
-
-func serveCachedPage(w http.ResponseWriter, data ScrapedData) {
-	w.Header().Set("Content-Type", "application/json")
-	jsonResponse, err := json.Marshal(data)
-	if err != nil {
-		http.Error(w, "Failed to marshal JSON", http.StatusInternalServerError)
-		return
-	}
-	w.Write(jsonResponse)
 }
