@@ -32,8 +32,7 @@ type cachedata struct {
 var visitedURLs = make(map[string]bool)
 
 type request struct {
-	url  string
-	paid bool
+	url string
 }
 
 type queue struct {
@@ -45,11 +44,7 @@ func (q *queue) enqueue(r request) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
 
-	if r.paid {
-		q.requests = append([]request{r}, q.requests...)
-	} else {
-		q.requests = append(q.requests, r)
-	}
+	q.requests = append(q.requests, r)
 }
 
 func (q *queue) dequeue() request {
@@ -93,7 +88,8 @@ func main() {
 func crawlhandler(w http.ResponseWriter, r *http.Request) {
 
 	// Create a new waitgroup to track the completion of the goroutine.
-	var wg sync.WaitGroup
+	var wg1 sync.WaitGroup
+	var wg2 sync.WaitGroup
 
 	r.ParseForm()
 	url := r.PostFormValue("url")
@@ -116,36 +112,58 @@ func crawlhandler(w http.ResponseWriter, r *http.Request) {
 	if exists {
 
 		// Create a new queue to store the requests.
-		q := queue{}
-		wg.Add(1)
+		Paidq := queue{}
+		Freeq := queue{}
+		wg1.Add(5)
+		wg2.Add(2)
 
 		// Add the request to the queue.
-		q.enqueue(request{
-			url:  url,
-			paid: customerType == "Paid",
-		})
+		if customerType == "Paid" {
+			Paidq.enqueue(request{
+				url: url,
+			})
+		} else {
+			Freeq.enqueue(request{
+				url: url,
+			})
+		}
 
-		// Start a goroutine to process the requests in the queue.
-		go func() {
-			defer wg.Done()
-			for {
-				if q.isOpen() {
-					req := q.dequeue()
-					// Process the request.
-					processRequest(w, req)
-				} else {
-					q.close()
-					return
+		for i := 0; i < 5; i++ {
+			go func() {
+				defer wg1.Done()
+				for {
+					if Paidq.isOpen() {
+						req := Paidq.dequeue()
+						processRequest(w, req)
+					} else {
+						Paidq.close()
+						return
+					}
 				}
-			}
-		}()
+			}()
+		}
+		for i := 0; i < 2; i++ {
+			go func() {
+				defer wg2.Done()
+				for {
+					if Freeq.isOpen() {
+						req := Freeq.dequeue()
+						processRequest(w, req)
+					} else {
+						Freeq.close()
+						return
+					}
+				}
+			}()
+		}
 
 	} else {
 		http.Error(w, "Web page not found", http.StatusNotFound)
 	}
 
 	// Wait for the goroutine to finish before returning the response to the user.
-	wg.Wait()
+	wg1.Wait()
+	wg2.Wait()
 }
 
 func processRequest(w http.ResponseWriter, r request) {
