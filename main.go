@@ -1,17 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-
-	// "net/url"
 	"os"
-	// "strings"
 	"sync"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/gocolly/colly/v2"
 )
 
@@ -20,14 +19,6 @@ type ScrapedData struct {
 }
 
 var mu sync.Mutex
-
-var Cachedata = make(map[string]cachedata)
-
-type cachedata struct {
-	url  string
-	data ScrapedData
-	Time time.Time
-}
 
 var visitedURLs = make(map[string]bool)
 
@@ -68,10 +59,55 @@ func (q *queue) close() {
 	q.requests = nil
 }
 
+var redisClient *redis.Client
+
+func initRedisClient() {
+	redisClient = redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379", // Your Redis server address
+		Password: "",               // No password by default
+		DB:       0,                // Default DB
+	})
+}
+
+func setDataWithTTL(key string, value ScrapedData) error {
+	ctx := context.Background()
+
+	// Serialize the struct into a JSON string
+	jsonData, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	// Store the JSON data in Redis
+	err = redisClient.Set(ctx, key, string(jsonData), 1*time.Hour).Err()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func getDataFromRedis(key string) (ScrapedData, error) {
+	ctx := context.Background()
+	// Retrieve the JSON data from Redis
+	jsonData, err := redisClient.Get(ctx, key).Result()
+	if err != nil {
+		return ScrapedData{}, err
+	}
+	// Deserialize the JSON string into the ScrapedData struct
+	var data ScrapedData
+	if err := json.Unmarshal([]byte(jsonData), &data); err != nil {
+		return ScrapedData{}, err
+	}
+
+	return data, nil
+}
+
 func main() {
 
 	http.HandleFunc("/crawl", crawlhandler)
 	http.Handle("/", http.FileServer(http.Dir(".")))
+	initRedisClient()
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -171,27 +207,34 @@ func processRequest(w http.ResponseWriter, r request) {
 	url := r.url
 
 	mu.Lock()
-	defer mu.Unlock()
 
-	cache, present := Cachedata[url]
-	if present {
-		fmt.Printf("data found in cache. Serving from cache...\n")
-		writeToUser(w, cache.data)
-	} else {
+	// cache, present := Cachedata[url]
+
+	// Get data
+	cacheData, err := getDataFromRedis(url)
+	if err != nil {
+		fmt.Printf("data not found in cache\n")
 
 		// Crawl the web page and scrape data and links
 		data := crawlWebPage(url)
 
-		Cachedata[url] = cachedata{
-			url:  url,
-			data: data,
-			Time: time.Now(),
+		// Set data with a TTL of 60 seconds
+		err := setDataWithTTL(url, data)
+		if err != nil {
+			fmt.Println("Error setting data:", err)
+		} else {
+			fmt.Println("Data set successfully with TTL 1 hr.")
 		}
 
 		// Return the scraped data as JSON
 		writeToUser(w, data)
+
+	} else {
+		fmt.Printf("Cache hit. Serving from cache...\n")
+		writeToUser(w, cacheData)
 	}
 
+	defer mu.Unlock()
 }
 
 func writeToUser(w http.ResponseWriter, data ScrapedData) {
