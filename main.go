@@ -129,7 +129,12 @@ func crawlhandler(w http.ResponseWriter, r *http.Request) {
 
 	r.ParseForm()
 	url := r.PostFormValue("url")
-	customerType := r.PostFormValue("customerType")
+	// customerType := r.PostFormValue("customerType")
+	customerType := r.URL.Query().Get("customerType")
+	fmt.Printf("%s ... %s\n", url, customerType)
+	if customerType != "Paid" {
+		customerType = "Free"
+	}
 
 	fmt.Printf("%s and %s\n", url, customerType)
 
