@@ -33,17 +33,15 @@ type queue struct {
 
 func (q *queue) enqueue(r request) {
 	q.mutex.Lock()
-	defer q.mutex.Unlock()
-
 	q.requests = append(q.requests, r)
+	defer q.mutex.Unlock()
 }
 
 func (q *queue) dequeue() request {
 	q.mutex.Lock()
-	defer q.mutex.Unlock()
-
 	r := q.requests[0]
 	q.requests = q.requests[1:]
+	defer q.mutex.Unlock()
 
 	return r
 }
@@ -54,9 +52,8 @@ func (q *queue) isOpen() bool {
 
 func (q *queue) close() {
 	q.mutex.Lock()
-	defer q.mutex.Unlock()
-
 	q.requests = nil
+	defer q.mutex.Unlock()
 }
 
 var redisClient *redis.Client
@@ -127,9 +124,7 @@ func crawlhandler(w http.ResponseWriter, r *http.Request) {
 	var wg1 sync.WaitGroup
 	var wg2 sync.WaitGroup
 
-	r.ParseForm()
-	url := r.PostFormValue("url")
-	// customerType := r.PostFormValue("customerType")
+	url := r.URL.Query().Get("url")
 	customerType := r.URL.Query().Get("customerType")
 	fmt.Printf("%s ... %s\n", url, customerType)
 	if customerType != "Paid" {
@@ -212,8 +207,6 @@ func processRequest(w http.ResponseWriter, r request) {
 	url := r.url
 
 	mu.Lock()
-
-	// cache, present := Cachedata[url]
 
 	// Get data
 	cacheData, err := getDataFromRedis(url)
@@ -310,7 +303,6 @@ func crawlWebPage(Weburl string) ScrapedData {
 	// URL to start scraping
 	startURL := Weburl
 
-	// visited := make(map[string]struct{})
 	var mutex sync.Mutex
 
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
