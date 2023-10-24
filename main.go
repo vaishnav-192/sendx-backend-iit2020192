@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -18,12 +19,30 @@ type ScrapedData struct {
 	Links []string `json:"links"`
 }
 
-var mu sync.Mutex
-
+// stores visited URl's
 var visitedURLs = make(map[string]bool)
 
 type request struct {
-	url string
+	url    string
+	worker int
+}
+
+// defines the active state of server
+type state struct {
+	workers       int
+	currWorkers   int
+	maxPageCrawl  int
+	currPageCrawl int
+	time          time.Time
+	Mu            sync.Mutex
+}
+
+var State = state{
+	maxPageCrawl:  100,
+	workers:       10,
+	currWorkers:   0,
+	currPageCrawl: 0,
+	time:          time.Now(),
 }
 
 type queue struct {
@@ -104,6 +123,12 @@ func main() {
 
 	http.HandleFunc("/crawl", crawlhandler)
 	http.Handle("/", http.FileServer(http.Dir(".")))
+	http.HandleFunc("/workers", workerHandler)
+	http.HandleFunc("/pages", pageHandler)
+	http.HandleFunc("/getworkers", getworkerHandler)
+	http.HandleFunc("/getpages", getpageHandler)
+	http.HandleFunc("/getCurrWorkers", getcurrworkerHandler)
+	http.HandleFunc("/getCurrPages", getcurrpageHandler)
 	initRedisClient()
 
 	port := os.Getenv("PORT")
@@ -118,6 +143,59 @@ func main() {
 	}
 }
 
+// Api to edit maxNo. of workers that can crawl at a time
+func workerHandler(w http.ResponseWriter, r *http.Request) {
+	newWorkers, err := strconv.Atoi(r.URL.Query().Get("workers"))
+	if err != nil {
+		http.Error(w, "Invalid number provided", http.StatusBadRequest)
+		return
+	}
+	State.Mu.Lock()
+	State.workers = newWorkers
+	State.Mu.Unlock()
+	fmt.Printf("updated workers...%v\n", newWorkers)
+	w.WriteHeader(http.StatusOK)
+}
+
+// Api to edit maxNo. of pages/requests that can process in one hour
+func pageHandler(w http.ResponseWriter, r *http.Request) {
+	newPages, err := strconv.Atoi(r.URL.Query().Get("pages"))
+	if err != nil {
+		http.Error(w, "Invalid number provided", http.StatusBadRequest)
+		return
+	}
+	State.Mu.Lock()
+	State.maxPageCrawl = newPages
+	State.Mu.Unlock()
+	fmt.Printf("updated max Pages to crawl...%v\n", newPages)
+	w.WriteHeader(http.StatusOK)
+}
+
+// Api to return number of max workers
+func getworkerHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("%v\n", State.workers)
+	w.WriteHeader(http.StatusOK)
+}
+
+// Api to return no. of max pages
+func getpageHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("%v\n", State.maxPageCrawl)
+	w.WriteHeader(http.StatusOK)
+}
+
+// Api to return number of max workers
+func getcurrworkerHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("%v\n", State.currWorkers)
+	w.WriteHeader(http.StatusOK)
+}
+
+// Api to return no. of max pages
+func getcurrpageHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("%v\n", State.currPageCrawl)
+	w.WriteHeader(http.StatusOK)
+}
+
+// Api to get query type and initiate requests
 func crawlhandler(w http.ResponseWriter, r *http.Request) {
 
 	// Create a new waitgroup to track the completion of the goroutine.
@@ -156,11 +234,13 @@ func crawlhandler(w http.ResponseWriter, r *http.Request) {
 		// Add the request to the queue.
 		if customerType == "Paid" {
 			Paidq.enqueue(request{
-				url: url,
+				url:    url,
+				worker: 5,
 			})
 		} else {
 			Freeq.enqueue(request{
-				url: url,
+				url:    url,
+				worker: 2,
 			})
 		}
 
@@ -206,7 +286,32 @@ func processRequest(w http.ResponseWriter, r request) {
 
 	url := r.url
 
-	mu.Lock()
+	//Rate limiting
+	State.Mu.Lock()
+	fmt.Printf("%v no. of pages crawled ... %v time remaining to fill bucket\n", State.currPageCrawl, time.Hour-time.Since(State.time))
+	if time.Since(State.time) > time.Hour {
+		State.currPageCrawl = 0
+		State.time = time.Now()
+	}
+	if State.currPageCrawl >= State.maxPageCrawl {
+		State.Mu.Unlock()
+		fmt.Printf("Hourly crawl limit exceeded\n")
+		http.Error(w, "Hourly crawl limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+	if State.currWorkers+r.worker > State.workers {
+		State.Mu.Unlock()
+		fmt.Printf("Max crawl workers limit reached\n")
+		http.Error(w, "Max crawl workers limit reached", http.StatusTooManyRequests)
+		return
+	} else {
+		State.currWorkers += r.worker
+	}
+	State.currPageCrawl++
+
+	State.Mu.Unlock()
+
+	// mu.Lock()
 
 	// Get data
 	cacheData, err := getDataFromRedis(url)
@@ -232,7 +337,11 @@ func processRequest(w http.ResponseWriter, r request) {
 		writeToUser(w, cacheData)
 	}
 
-	defer mu.Unlock()
+	// defer mu.Unlock()
+
+	State.Mu.Lock()
+	State.currWorkers -= r.worker
+	State.Mu.Unlock()
 }
 
 func writeToUser(w http.ResponseWriter, data ScrapedData) {
@@ -308,7 +417,7 @@ func crawlWebPage(Weburl string) ScrapedData {
 	c.OnHTML("a[href]", func(e *colly.HTMLElement) {
 		// Extract and print links
 		link := e.Request.AbsoluteURL(e.Attr("href"))
-		fmt.Printf("Link: %s\n", link)
+		// fmt.Printf("Link: %s\n", link)
 
 		if !visitedURLs[link] {
 			mutex.Lock()
