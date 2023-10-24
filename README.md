@@ -1,9 +1,10 @@
 # sendx-backend-iit2020192
 Welcome to my Go web application README!<br>This document will provide you with essential information about the project, its features, how to set it up, and how to use it.
-I have implemented 2 parts of the assignment:
+I have implemented all 3 parts of the assignment:
 <ul>
   <li>Required</li>
   <li>Good to have</li>
+<li>Great to have</li>
 </ul>
 
 ## Tech used:
@@ -21,12 +22,13 @@ I have implemented 2 parts of the assignment:
 <ul>
 	<li>Checks the existance of webURL giving by the user (based on status code returned). If also retires to check 3 time (can be changes according to user's choice)</li>
 	<li>It maintains 2 queues = PaidCustomers, FreeCustomers. I have assigned 5 crawler workers for PaidCustomers and 2 crawler workers for FreeCustomers. The crawler workers can crawl multiple pages concurrently.</li>
-	<li>Before Processing a request, we first chweck if the data is present in cache or not. If present, we simple fetch data from cache and return. This significantly improves application performance and response time.</li>
+	<li>Before Processing a request, we first check if the data is present in cache or not. If present, we simple fetch data from cache and return. This significantly improves application performance and response time.</li>
 	<li>This application crawls the webpage using gocolly, at the rate depth=2. It maintains a visited array to store those urls which are already visited (to reduce redundance of the application to crawl same weblinks again and again)</li>
 	<li>I have commented out</li>
 
 	// c.Limit(&colly.LimitRule{DomainGlob: "*", Parallelism: 2})
 This can also improve perfomance significantly by restricting ourselves to same domain and parellel crawlling.
+<li>Implemented APIs to controll maximum number of crawler workers that can crawl at a time and maximum number of requets/pages that can be crawled in a span of 1 hour</li>
 </ul>
 
 ## Steps for Installation:
@@ -40,6 +42,11 @@ This can also improve perfomance significantly by restricting ourselves to same 
 
 	go get github.com/go-redis/redis/v8
  	github.com/gocolly/colly/v2
+</ul>
+
+  ## Steps to run the Application:
+
+  <ul>
 
  <li>Run Redis-server from ~/Redis/redis-server. Do not close the Redis-server, keep it running in background</li>
  <li>Run main.go</li>
@@ -108,7 +115,35 @@ if 'customerType' field is not given, bu default it takes 'Free' customer.
 
 ![comand](images/invokeWebrequest.png)
 </ul>
- 
+ <li>We can update max no. of pages/request and crawler workers and even see no. of active crawler workers and total no. of requests served in that hour through these following APIs:</li>
+
+ 		http://localhost:8080/pages?pages=(int)
+ 		http://localhost:8080/workers?workers=(int)
+ 		http://localhost:8080/getworkers   		
+ 		http://localhost:8080/getpages   		
+ 		http://localhost:8080/getCurrPages   		
+ 		http://localhost:8080/getCurrWorkers
+
+   Example: (output is printed in console)
+   ![setPages](images/UpdatingCrawlLimit.png)
+   ![getPages](images/getPages.png)
+   <li>
+	   If we spam requests, two things may happen:
+	   <ul>
+		   <li>out of workers due to set max no. of workers (that can work at a instance)</li>
+Example: spamming request
+
+![limitPage1](images/limitPage1.png)	 	
+
+Out of requests
+![limitPage2](images/limitPage2.png)	 	
+<li>out of requests due to hourly set limit (refreshes every hour)</li>
+
+Example: spamming workers
+
+![limitWorker](images/limitWorker.png)
+		</ul>
+   </li>
 </ul>
 
 ### Major takeawys from this project:
